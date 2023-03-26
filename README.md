@@ -13,7 +13,7 @@ Then train with
 ```python
 python train_dolly.py <num_gpus>
 ```
-The trained model is saved in `dolly_training`.
+For 4 x 80G A100 GPUs, the training takes about 1 hour. The trained model is saved in `dolly_training`.
 
 Afterwards, you can load the models as follows.
 ```python
