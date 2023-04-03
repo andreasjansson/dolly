@@ -50,6 +50,7 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
 
             response_token_ids_start_idx = None
             for idx in np.where(batch["labels"][i] == response_token_ids[0])[0]:
+
                 if np.array_equal(response_token_ids, batch["labels"][i, idx : idx + len(response_token_ids)]):
                     response_token_ids_start_idx = idx
                     break
@@ -75,10 +76,19 @@ def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_lengt
     )
 
 
+def maybe_add_text_column(rec):
+    # handle legacy alpaca format with "prompt" and "output" keys
+    if "text" not in rec:
+        rec["text"] = f"{rec['prompt']}\n{rec['output']}"
+    return rec
+
+
 def load_training_dataset(training_data_id: str = DEFAULT_TRAINING_DATASET, split: str = "train") -> Dataset:
     logger.info(f"Loading {training_data_id} dataset")
-    dataset: Dataset = load_dataset(training_data_id)[split]
+    dataset: Dataset = load_dataset("json", data_files=training_data_id)[split]
     logger.info("Found %d rows", dataset.num_rows)
+
+    dataset = dataset.map(maybe_add_text_column)
 
     # Remove empty responses
     dataset = dataset.filter(lambda rec: not rec["text"].strip().endswith("### Response:"))
@@ -104,7 +114,8 @@ def load_model(
 ) -> AutoModelForCausalLM:
     logger.info(f"Loading model for {pretrained_model_name_or_path}")
     model = AutoModelForCausalLM.from_pretrained(
-        pretrained_model_name_or_path, trust_remote_code=True, use_cache=False if gradient_checkpointing else True
+        # TODO: why is use_cache false if gradient checkpointing is true?
+        pretrained_model_name_or_path, trust_remote_code=True #, use_cache=False if gradient_checkpointing else True
     )
     return model
 
@@ -117,7 +128,7 @@ def get_model_tokenizer(
     return model, tokenizer
 
 
-def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int = MAX_LENGTH, seed=DEFAULT_SEED) -> Dataset:
+def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int = MAX_LENGTH, seed=DEFAULT_SEED, training_dataset=DEFAULT_TRAINING_DATASET) -> Dataset:
     """Loads the training dataset and tokenizes it so it is ready for training.
 
     Args:
@@ -128,14 +139,21 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int = MAX_LENGTH, s
         Dataset: HuggingFace dataset
     """
 
-    dataset = load_training_dataset()
+    dataset = load_training_dataset(training_dataset)
+
+    # support legacy input format
+    columns_to_remove = ["output", "text"]
+    if "instruction" in dataset.column_names:
+        columns_to_remove += ["instruction", "input"]
+    else:
+        columns_to_remove += ["prompt"]
 
     logger.info("Preprocessing dataset")
     _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
     dataset = dataset.map(
         _preprocessing_function,
         batched=True,
-        remove_columns=["instruction", "input", "output", "text"],
+        remove_columns=columns_to_remove,
     )
 
     logger.info("Shuffling dataset")
@@ -159,12 +177,14 @@ def train(
     local_rank,
     bf16,
     test_size=1000,
+    input_model=DEFAULT_INPUT_MODEL,
+    training_dataset=DEFAULT_TRAINING_DATASET,
 ):
     set_seed(seed)
 
-    model, tokenizer = get_model_tokenizer(gradient_checkpointing=gradient_checkpointing)
+    model, tokenizer = get_model_tokenizer(pretrained_model_name_or_path=input_model, gradient_checkpointing=gradient_checkpointing)
 
-    processed_dataset = preprocess_dataset(tokenizer=tokenizer, seed=seed)
+    processed_dataset = preprocess_dataset(tokenizer=tokenizer, seed=seed, training_dataset=training_dataset)
 
     split_dataset = processed_dataset.train_test_split(test_size=test_size, seed=seed)
 
@@ -191,7 +211,7 @@ def train(
         evaluation_strategy="steps",
         eval_steps=10,
         save_strategy="steps",
-        save_steps=200,
+        save_steps=20000,
         save_total_limit=1,
         load_best_model_at_end=True,
         report_to="tensorboard",
@@ -248,6 +268,8 @@ def train(
     help="Provided by deepspeed to identify which instance this process is when performing multi-GPU training.",
 )
 @click.option("--bf16", type=bool, default=True, help="Whether to use bf16 (preferred on A100's).")
+@click.option("--input-model", type=str, default=DEFAULT_INPUT_MODEL, help="Model to start training from")
+@click.option("--training-dataset", type=str, default=DEFAULT_TRAINING_DATASET, help="Dataset to train on")
 def main(**kwargs):
     train(**kwargs)
 

@@ -22,7 +22,7 @@ checkpoint_dir_name = f"{model_name}__{timestamp}"
 root_path = os.getcwd()
 deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
 
-local_training_root = os.path.join(os.path.expanduser("~"), "dolly_training")
+local_training_root = "/src/dolly_training"
 
 os.makedirs(local_training_root, exist_ok=True)
 
@@ -39,6 +39,7 @@ print(f"DBFS Output Dir: {dbfs_output_dir}")
 print(f"Tensorboard Display Dir: {tensorboard_display_dir}")
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_DATASETS_CACHE"] = "/src/.hf-cache"
 
 
 def run_cmd(command):
