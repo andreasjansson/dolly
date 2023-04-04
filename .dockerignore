@@ -1,5 +1,4 @@
 .hf-cache
-.cog
 dolly_training
 weights
 tuned_weights.tensors
