@@ -16,6 +16,7 @@ import logging
 from functools import partial
 from typing import Any, Dict, List, Tuple, Union
 
+from tensorizer import TensorSerializer
 import click
 import numpy as np
 from datasets import Dataset, load_dataset
@@ -168,6 +169,7 @@ def train(
     local_output_dir,
     dbfs_output_dir,
     epochs,
+    max_steps,
     per_device_train_batch_size,
     per_device_eval_batch_size,
     lr,
@@ -203,6 +205,7 @@ def train(
         bf16=bf16,
         learning_rate=lr,
         num_train_epochs=epochs,
+        max_steps=max_steps,
         deepspeed=deepspeed,
         gradient_checkpointing=gradient_checkpointing,
         logging_dir=f"{local_output_dir}/runs",
@@ -210,11 +213,8 @@ def train(
         logging_steps=10,
         evaluation_strategy="steps",
         eval_steps=10,
-        save_strategy="steps",
-        save_steps=20000,
-        save_total_limit=1,
-        load_best_model_at_end=True,
-        report_to="tensorboard",
+        save_strategy="no",
+        report_to="none",
         disable_tqdm=True,
         remove_unused_columns=False,
         local_rank=local_rank,
@@ -250,6 +250,7 @@ def train(
 )
 @click.option("--dbfs-output-dir", type=str, help="Sync data to this path on DBFS")
 @click.option("--epochs", type=int, default=3, help="Number of epochs to train for.")
+@click.option("--max-steps", type=int, default=-1, help="Maximum number of steps to train for.")
 @click.option("--per-device-train-batch-size", type=int, default=8, help="Batch size to use for training.")
 @click.option("--per-device-eval-batch-size", type=int, default=8, help="Batch size to use for evaluation.")
 @click.option("--lr", type=float, default=1e-5, help="Learning rate to use for training.")

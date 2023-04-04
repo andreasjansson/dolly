@@ -4,7 +4,9 @@ import logging
 from subprocess import call
 from datetime import datetime
 import torch
+from tensorizer import TensorSerializer
 from cog import Input, Path, BaseModel
+from transformers import AutoModelForCausalLM
 
 from training.trainer import load_training_dataset, load_tokenizer
 
@@ -14,13 +16,17 @@ logging.basicConfig(
 logging.getLogger("py4j").setLevel(logging.WARNING)
 logging.getLogger("sh.command").setLevel(logging.ERROR)
 
+MODEL_OUT = "/src/tuned_weights.tensors"
+
 
 class TrainingOutput(BaseModel):
     weights: Path
 
 
 def train(
-    train_data: Path = Input(description="path to data file to use for fine-tuning your model"),
+    train_data: Path = Input(description="Path to data file to use for fine-tuning your model"),
+    epochs: int = Input(description="Number of epochs to train", default=1),
+    max_steps: int = Input(description="Maximum number of training steps", default=-1),
     ) -> TrainingOutput:
     input_model = os.environ.get("COG_WEIGHTS")
     if input_model is None:
@@ -29,42 +35,40 @@ def train(
     load_training_dataset(str(train_data))
     load_tokenizer(input_model)
 
-    timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    model_name = "dolly"
-    checkpoint_dir_name = f"{model_name}__{timestamp}"
-
     root_path = os.getcwd()
     deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
 
-    local_training_root = "/src/dolly_training"
-
-    os.makedirs(local_training_root, exist_ok=True)
-
-    local_output_dir = os.path.join(local_training_root, checkpoint_dir_name)
-    dbfs_output_dir = os.path.join("/dbfs/dolly_training", checkpoint_dir_name)
+    output_dir = os.path.join("/tmp/dolly-training")
+    os.makedirs(output_dir, exist_ok=True)
 
     num_gpus = torch.cuda.device_count()
-    print(f"{num_gpus=}")  # TODO(andreas): remove debug
-
     num_gpus_flag = f"--num_gpus={num_gpus}"
 
-    tensorboard_display_dir = f"{local_output_dir}/runs"
-
-    print(f"Local Output Dir: {local_output_dir}")
-    print(f"DBFS Output Dir: {dbfs_output_dir}")
-    print(f"Tensorboard Display Dir: {tensorboard_display_dir}")
+    print(f"Local Output Dir: {output_dir}")
+    print(f"Number of GPUs: {num_gpus}")
 
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ["HF_DATASETS_CACHE"] = "/src/.hf-cache"
 
+    # TODO: use deepspeed's python api instead of subprocessing
     call("deepspeed "
          + num_gpus_flag
          + " --module training.trainer --deepspeed "
          + deepspeed_config
          + f" --training-dataset={str(train_data)}"
          + f" --input-model={input_model}"
-         + " --epochs 1 --local-output-dir "
-         + local_output_dir
-         + " --dbfs-output-dir "
-         + dbfs_output_dir
+         + f" --epochs={epochs}"
+         + f" --max-steps={max_steps}"
+         + " --local-output-dir "
+         + output_dir
          + " --per-device-train-batch-size 8 --per-device-eval-batch-size 8 --lr 1e-5", shell=True)
+
+    if os.path.exists(MODEL_OUT):
+        os.remove(MODEL_OUT)
+
+    model = AutoModelForCausalLM.from_pretrained(output_dir).to('cuda')
+    serializer = TensorSerializer(MODEL_OUT)
+    serializer.write_module(model)
+    serializer.close()
+
+    return TrainingOutput(weights=Path(MODEL_OUT))

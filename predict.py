@@ -1,26 +1,56 @@
+import time
+from collections import OrderedDict
 from typing import Optional
+
 from cog import BasePredictor, Input, Path
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from tensorizer import TensorDeserializer
+from tensorizer.utils import no_init_or_tensor
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
 CACHE_DIR = "/src/.hf-cache"
-
+DEFAULT_MODEL = "EleutherAI/gpt-j-6B"
 
 class Predictor(BasePredictor):
     def setup(self, weights: Optional[Path] = None):
         if weights is not None and weights.name == 'weights':
             # bugfix
             weights = None
-
         if weights is None:
-            weights = "EleutherAI/gpt-j-6B"
+            self.model = self.load_huggingface_model(weights=DEFAULT_MODEL)
+        elif (hasattr(weights, 'filename') and 'tensors' in weights.filename) or str(weights).endswith(".tensors"):
+            self.model = self.load_tensorizer(weights)
+        else:
+            self.model = self.load_huggingface_model(weights=weights)
 
-        # self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model = AutoModelForCausalLM.from_pretrained(
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            DEFAULT_MODEL, cache_dir=CACHE_DIR
+        )
+
+    def load_huggingface_model(self, weights=None):
+        st = time.time()
+        print(f'loading weights from {weights} w/o tensorizer')
+        model = AutoModelForCausalLM.from_pretrained(
             weights, device_map="auto", cache_dir=CACHE_DIR
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            weights, cache_dir=CACHE_DIR
+        model.to(self.device)
+        print(f'weights loaded in {time.time() - st}')
+        return model
+
+
+    def load_tensorizer(self, weights):
+        st = time.time()
+        print(f'deserializing weights from {weights}')
+        config = AutoConfig.from_pretrained(DEFAULT_MODEL)
+
+        model = no_init_or_tensor(
+            lambda: AutoModelForCausalLM.from_pretrained(
+                None, config=config, state_dict=OrderedDict()
+            )
         )
+        des = TensorDeserializer(weights, plaid_mode=True)
+        des.load_into_module(model)
+        print(f'weights loaded in {time.time() - st}')
+        return model
 
     def predict(
         self,
