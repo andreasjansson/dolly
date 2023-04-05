@@ -36,8 +36,7 @@ class Predictor(BasePredictor):
         print(f'loading weights from {weights} w/o tensorizer')
         model = YieldingCausalLM.from_pretrained(
             weights, device_map="auto", cache_dir=CACHE_DIR
-        )
-        model.to(self.device)
+        ).to("cuda:0")
         print(f'weights loaded in {time.time() - st}')
         return model
 
@@ -97,7 +96,10 @@ class Predictor(BasePredictor):
             default=1,
         ),
     ) -> ConcatenateIterator[str]:
-        input = self.tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
+        input = self.tokenizer(prompt, return_tensors="pt").input_ids.to("cuda:0")
+
+        if not prompt.endswith("### Response:\n"):
+            prompt += " ### Response:\n"
 
         do_sample = False if decoding == "beam_search" else True
         with torch.inference_mode():

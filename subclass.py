@@ -182,6 +182,7 @@ class YieldingCausalLM(GPTJForCausalLM):
             unfinished_sequences = input_ids.new(input_ids.shape[0]).fill_(1)
 
             this_peer_finished = False  # used by synced_gpus only
+
             # auto-regressive generation
             while True:
                 if synced_gpus:
