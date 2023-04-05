@@ -56,7 +56,8 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
                     break
 
             if response_token_ids_start_idx is None:
-                raise RuntimeError("Could not find response key token IDs")
+                print("Could not find response key token IDs")
+                continue
 
             response_token_ids_end_idx = response_token_ids_start_idx + len(response_token_ids)
 
@@ -221,7 +222,7 @@ def train(
         logging_strategy="steps",
         logging_steps=10,
         evaluation_strategy="steps",
-        eval_steps=10,
+        eval_steps=100,
         save_strategy="no",
         report_to="none",
         disable_tqdm=True,
