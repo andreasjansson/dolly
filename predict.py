@@ -2,13 +2,18 @@ import time
 from collections import OrderedDict
 from typing import Optional
 
-from cog import BasePredictor, Input, Path
+import torch
+from cog import BasePredictor, ConcatenateIterator, Input, Path
 from tensorizer import TensorDeserializer
 from tensorizer.utils import no_init_or_tensor
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
+from subclass import YieldingCausalLM
+
+
 CACHE_DIR = "/src/.hf-cache"
 DEFAULT_MODEL = "EleutherAI/gpt-j-6B"
+
 
 class Predictor(BasePredictor):
     def setup(self, weights: Optional[Path] = None):
@@ -29,7 +34,7 @@ class Predictor(BasePredictor):
     def load_huggingface_model(self, weights=None):
         st = time.time()
         print(f'loading weights from {weights} w/o tensorizer')
-        model = AutoModelForCausalLM.from_pretrained(
+        model = YieldingCausalLM.from_pretrained(
             weights, device_map="auto", cache_dir=CACHE_DIR
         )
         model.to(self.device)
@@ -43,7 +48,7 @@ class Predictor(BasePredictor):
         config = AutoConfig.from_pretrained(DEFAULT_MODEL)
 
         model = no_init_or_tensor(
-            lambda: AutoModelForCausalLM.from_pretrained(
+            lambda: YieldingCausalLM.from_pretrained(
                 None, config=config, state_dict=OrderedDict()
             )
         )
@@ -91,19 +96,51 @@ class Predictor(BasePredictor):
             le=5,
             default=1,
         ),
-    ) -> str:
+    ) -> ConcatenateIterator[str]:
         input = self.tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
 
-        do_sample = False if decoding == "beam_search" else False
+        do_sample = False if decoding == "beam_search" else True
+        with torch.inference_mode():
+            first_token_yielded = False
+            prev_ids = []
+            for output in self.model.generate(
+                    input,
+                    max_length=max_length,
+                    do_sample=do_sample,
+                    num_beams=num_beams,
+                    temperature=temperature,
+                    top_p=top_p if decoding == "top_p" else 1,
+                    top_k=top_k if decoding == "top_k" else 50,
+                    repetition_penalty=repetition_penalty,
+            ):
+                cur_id = output.item()
+                # in order to properly handle spaces, we need to do our own tokenizing. Fun!
+                # we're building up a buffer of sub-word / punctuation tokens until we hit a space, and then yielding whole words + punctuation.
+                cur_token = self.tokenizer.convert_ids_to_tokens(cur_id)
 
-        outputs = self.model.generate(
-            input,
-            max_length=max_length,
-            do_sample=do_sample,
-            num_beams=num_beams,
-            temperature=temperature,
-            top_p=top_p if decoding == "top_p" else 1,
-            top_k=top_k if decoding == "top_k" else 50,
-            repetition_penalty=repetition_penalty,
-        )
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                # skip initial newline, which this almost always yields. hack - newline id = 13.
+                if not first_token_yielded and not prev_ids and cur_id == 13:
+                    continue
+
+                # Words start with Ġ
+                if cur_token.startswith("Ġ"):
+                    if prev_ids:
+                        yield self.tokenizer.decode(prev_ids)
+                        prev_ids = []
+
+                    prev_ids = [cur_id]
+                    continue
+
+                # Compound words are denoted by a "Ċ" followed by any
+                # number of tokens
+                if cur_token == "Ċ":
+                    if prev_ids:
+                        yield self.tokenizer.decode(prev_ids)
+                        prev_ids = []
+                    continue
+
+                prev_ids.append(cur_id)
+
+            if prev_ids:
+                yield self.tokenizer.decode(prev_ids)
+                prev_ids = []
