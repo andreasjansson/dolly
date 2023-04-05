@@ -51,7 +51,6 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
 
             response_token_ids_start_idx = None
             for idx in np.where(batch["labels"][i] == response_token_ids[0])[0]:
-
                 if np.array_equal(response_token_ids, batch["labels"][i, idx : idx + len(response_token_ids)]):
                     response_token_ids_start_idx = idx
                     break
@@ -80,7 +79,17 @@ def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_lengt
 def maybe_add_text_column(rec):
     # handle legacy alpaca format with "prompt" and "output" keys
     if "text" not in rec:
-        rec["text"] = f"{rec['prompt']}\n{rec['output']}"
+        prompt = rec['prompt']
+        completion = rec['completion']
+        # The "### Response:" format is in the alpaca dataset, but not
+        # in all datasets.
+        # TODO: Clean this up
+        if "### Response:" not in prompt:
+            prompt += "\n\n### Response:"
+        completion = completion.strip()
+
+        rec["text"] = f"{prompt}\n{completion}"
+
     return rec
 
 
@@ -143,11 +152,11 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int = MAX_LENGTH, s
     dataset = load_training_dataset(training_dataset)
 
     # support legacy input format
-    columns_to_remove = ["output", "text"]
+    columns_to_remove = ["text"]
     if "instruction" in dataset.column_names:
-        columns_to_remove += ["instruction", "input"]
+        columns_to_remove += ["instruction", "input", "output"]
     else:
-        columns_to_remove += ["prompt"]
+        columns_to_remove += ["prompt", "completion"]
 
     logger.info("Preprocessing dataset")
     _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
@@ -178,7 +187,7 @@ def train(
     gradient_checkpointing,
     local_rank,
     bf16,
-    test_size=1000,
+    test_size=0.1,
     input_model=DEFAULT_INPUT_MODEL,
     training_dataset=DEFAULT_TRAINING_DATASET,
 ):
