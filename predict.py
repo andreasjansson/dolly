@@ -93,13 +93,13 @@ class Predictor(BasePredictor):
             description="Penalty for repeated words in generated text; 1 is no penalty, values greater than 1 discourage repetition, less than 1 encourage it.",
             ge=0.01,
             le=5,
-            default=1,
+            default=1.2,
         ),
     ) -> ConcatenateIterator[str]:
-        input = self.tokenizer(prompt, return_tensors="pt").input_ids.to("cuda:0")
-
         if not prompt.endswith("### Response:\n"):
             prompt += " ### Response:\n"
+
+        input = self.tokenizer(prompt, return_tensors="pt").input_ids.to("cuda:0")
 
         do_sample = False if decoding == "beam_search" else True
         with torch.inference_mode():
@@ -140,6 +140,10 @@ class Predictor(BasePredictor):
                         yield self.tokenizer.decode(prev_ids)
                         prev_ids = []
                     continue
+
+                # End token
+                if cur_token == "###":
+                    break
 
                 prev_ids.append(cur_id)
 
