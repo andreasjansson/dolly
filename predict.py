@@ -35,7 +35,7 @@ class Predictor(BasePredictor):
         st = time.time()
         print(f'loading weights from {weights} w/o tensorizer')
         model = YieldingCausalLM.from_pretrained(
-            weights, device_map="auto", cache_dir=CACHE_DIR
+            weights, cache_dir=CACHE_DIR
         ).to("cuda:0")
         print(f'weights loaded in {time.time() - st}')
         return model
@@ -66,13 +66,13 @@ class Predictor(BasePredictor):
         ),
         decoding: str = Input(
             description="Choose a decoding method",
-            choices=["beam_search", "top_p", "top_k"],
-            default="beam_search",
+            choices=["top_p", "top_k"],
+            default="top_p",
         ),
-        num_beams: int = Input(
-            description="Valid if you choose beam_search. Number of beams for beam search. 1 means no beam search.",
-            default=1,
-        ),
+        # num_beams: int = Input(
+        #     description="Valid if you choose beam_search. Number of beams for beam search. 1 means no beam search.",
+        #     default=1,
+        # ),
         top_k: int = Input(
             description="Valid if you choose top_k decoding. The number of highest probability vocabulary tokens to keep for top-k-filtering",
             default=50,
@@ -109,7 +109,7 @@ class Predictor(BasePredictor):
                     input,
                     max_length=max_length,
                     do_sample=do_sample,
-                    num_beams=num_beams,
+                    #num_beams=num_beams,
                     temperature=temperature,
                     top_p=top_p if decoding == "top_p" else 1,
                     top_k=top_k if decoding == "top_k" else 50,
