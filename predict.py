@@ -18,7 +18,6 @@ from subclass import YieldingCausalLM
 CACHE_DIR = "/src/.hf-cache"
 DEFAULT_MODEL = "EleutherAI/gpt-j-6B"
 
-os.environ['COG_WEIGHTS'] = "https://pbxt.replicate.delivery/lJBc2S9TFfSiMCVS4gyjUx5vF0AgmKyJ9HwnYe2g4ZBqbjyQA/tuned_weights.tensors"
 
 class Predictor(BasePredictor):
     def setup(self, weights: Optional[Path] = None):
