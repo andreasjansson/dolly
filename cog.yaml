@@ -23,8 +23,8 @@ build:
     - "tensorizer==1.0.1"
 
   # commands run after the environment is setup
-  # run:
-    # - "echo env is ready!"
+  run:
+    - "mkdir /gc && cd /gc && curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-426.0.0-linux-x86_64.tar.gz && tar -xf google-cloud-cli-426.0.0-linux-x86_64.tar.gz && ./google-cloud-sdk/install.sh -q"
     # - "echo another command if needed"
 
 # predict.py defines how predictions are run on your model
